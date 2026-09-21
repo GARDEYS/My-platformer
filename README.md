@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -8,14 +9,29 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             width: 100%; height: 100%;
-            overflow: hidden; background: #222;
-            font-family: Arial, sans-serif; touch-action: none;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+            touch-action: none;
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
             user-select: none;
         }
-        canvas { display: block; margin: 0 auto; background: #87CEEB; image-rendering: pixelated; }
+        /* Canvas растягивается на весь экран, сохраняя пропорции */
+        canvas {
+            display: block;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #87CEEB;
+            image-rendering: pixelated;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+        }
         #controls {
             position: fixed; bottom: 20px; left: 0; right: 0;
             display: flex; justify-content: space-between;
@@ -75,7 +91,7 @@
     </style>
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="game" width="960" height="540"></canvas>
     <button id="sound-btn" title="Звук">🔊</button>
     <button id="lb-btn">🏆 <span data-i18n="leaders">Лидеры</span></button>
 
@@ -236,7 +252,6 @@
             };
         })();
 
-        // Разблокировка звука при первом действии
         function firstInteraction() {
             Sound.unlock();
             Sound.startMusic();
@@ -248,7 +263,6 @@
         document.addEventListener('keydown', firstInteraction);
         document.addEventListener('touchstart', firstInteraction);
 
-        // Кнопка звука
         document.getElementById('sound-btn').addEventListener('click', () => {
             Sound.unlock();
             const on = Sound.toggle();
@@ -380,22 +394,22 @@
         document.getElementById('lb-btn').addEventListener('click', showLeaderboard);
         document.getElementById('lb-close').addEventListener('click', () => document.getElementById('lb-modal').classList.remove('active'));
 
-        // Запрет контекстного меню
         window.addEventListener('contextmenu', e => e.preventDefault());
 
         // ============================================
-        // КАНВАС
+        // КАНВАС — ФИКСИРОВАННЫЙ 960×540, растягивается через CSS
         // ============================================
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
-        let W, H;
+        const W = 960;
+        const H = 540;
+
+        // Ничего не делаем при ресайзе — CSS сам масштабирует canvas
         function resize() {
-            W = Math.min(window.innerWidth, 960);
-            H = Math.min(window.innerHeight, 540);
-            canvas.width = W; canvas.height = H;
+            canvas.width = W;
+            canvas.height = H;
         }
         resize();
-        window.addEventListener('resize', resize);
 
         // ============================================
         // КОНСТАНТЫ
@@ -1246,7 +1260,6 @@
         loadLevel(0);
         applyLocalization();
 
-        // Пауза звука при сворачивании вкладки
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 Sound.pauseAll();

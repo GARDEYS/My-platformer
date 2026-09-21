@@ -1,10 +1,10 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Платформер</title>
+    <title>Jumpix — платформер</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -18,7 +18,6 @@
             -ms-user-select: none;
             user-select: none;
         }
-        /* Canvas растягивается на весь экран, сохраняя пропорции */
         canvas {
             display: block;
             position: fixed;
@@ -281,8 +280,18 @@
                 passed: 'ПРОЙДЕН!', allPassed: 'ВСЕ УРОВНИ ПРОЙДЕНЫ!',
                 score: 'Очки', record: 'Рекорд', nextLevel: 'Загрузка следующего уровня...',
                 hint: '🔼×2 двойной прыжок · 🧲 магнит · 🐢 замедление · 👹 босс на 2-м уровне',
-                boss: 'БОСС',
-                shield: 'Щит', speed: 'Ускорение', heart: 'Жизнь', magnet: 'Магнит', slow: 'Замедление'
+                boss: 'БОСС', bossDefeated: 'БОСС ПОБЕЖДЁН!',
+                gameOver: 'ИГРА ОКОНЧЕНА', restart: 'Перезапуск...',
+                shield: 'Щит', speed: 'Ускорение', heart: 'Жизнь', magnet: 'Магнит', slow: 'Замедление',
+                phrases: [
+                    'Не сдавайся!', 'Попробуй ещё!', 'Ты близко!', 'Ещё один шанс!',
+                    'Всё получится!', 'Не останавливайся!', 'Ты сможешь!', 'Почти получилось!',
+                    'Попробуй снова!', 'Так держать!'
+                ],
+                statsTitle: 'СТАТИСТИКА',
+                statsCoins: 'Монет собрано', statsScore: 'Очков набрано',
+                statsDeaths: 'Смертей', statsTime: 'Время', statsLevel: 'Уровень',
+                statsRecord: 'Рекорд', newRecord: 'НОВЫЙ РЕКОРД!'
             },
             en: {
                 leaders: 'Leaders', records: 'Records', loading: 'Loading...', close: 'Close',
@@ -291,8 +300,18 @@
                 passed: 'PASSED!', allPassed: 'ALL LEVELS PASSED!',
                 score: 'Score', record: 'Record', nextLevel: 'Loading next level...',
                 hint: '🔼×2 double jump · 🧲 magnet · 🐢 slow-mo · 👹 boss on level 2',
-                boss: 'BOSS',
-                shield: 'Shield', speed: 'Speed', heart: 'Life', magnet: 'Magnet', slow: 'Slow-mo'
+                boss: 'BOSS', bossDefeated: 'BOSS DEFEATED!',
+                gameOver: 'GAME OVER', restart: 'Restarting...',
+                shield: 'Shield', speed: 'Speed', heart: 'Life', magnet: 'Magnet', slow: 'Slow-mo',
+                phrases: [
+                    "Don't give up!", 'Try again!', "You're close!", 'One more chance!',
+                    'You can do it!', 'Keep going!', 'Almost there!', 'Try once more!',
+                    "Don't stop now!", 'You got this!'
+                ],
+                statsTitle: 'STATS',
+                statsCoins: 'Coins collected', statsScore: 'Score',
+                statsDeaths: 'Deaths', statsTime: 'Time', statsLevel: 'Level',
+                statsRecord: 'Record', newRecord: 'NEW RECORD!'
             }
         };
         let currentLang = 'ru';
@@ -397,14 +416,13 @@
         window.addEventListener('contextmenu', e => e.preventDefault());
 
         // ============================================
-        // КАНВАС — ФИКСИРОВАННЫЙ 960×540, растягивается через CSS
+        // КАНВАС
         // ============================================
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         const W = 960;
         const H = 540;
 
-        // Ничего не делаем при ресайзе — CSS сам масштабирует canvas
         function resize() {
             canvas.width = W;
             canvas.height = H;
@@ -516,6 +534,11 @@
         let hurtFlash = 0;
         let jumpEdge = false;
 
+        // Статистика за попытку
+        let attemptCoins = 0;
+        let attemptStartTime = Date.now();
+        let attemptDeaths = 0;
+
         // ============================================
         // ИГРОК
         // ============================================
@@ -539,6 +562,51 @@
         };
         let bossProjectiles = [];
         let bossDefeated = false;
+
+        // ============================================
+        // ПРАЗДНИЧНАЯ АНИМАЦИЯ (после победы над боссом)
+        // ============================================
+        let celebration = {
+            active: false,
+            timer: 0,
+            duration: 300,
+            fireworks: [],
+            confetti: [],
+            fireworkTimer: 0,
+            textScale: 1,
+            textAlpha: 0,
+            lightRays: [],
+            lightRayAngle: 0,
+            lightRaysTimer: 0,
+            bossDebris: []
+        };
+
+        // ============================================
+        // ЭФФЕКТ ПРОИГРЫША
+        // ============================================
+        let gameOver = {
+            active: false,
+            timer: 0,
+            duration: 210,
+            debris: [],
+            textAlpha: 0,
+            textScale: 0.3,
+            shakeX: 0,
+            shakeY: 0,
+            flashAlpha: 0,
+            darkAlpha: 0,
+            phrase: '',
+            phraseAlpha: 0,
+            phraseScale: 0.5,
+            phraseTimer: 0,
+            phraseDuration: 90,
+            phraseIndex: 0,
+            stats: null,
+            statsAlpha: 0,
+            statsSlide: 0,
+            isNewRecord: false,
+            recordGlow: 0
+        };
 
         // ============================================
         // ЗАГРУЗКА УРОВНЯ
@@ -568,6 +636,38 @@
             boss.shootTimer = 120;
             bossProjectiles = [];
             bossDefeated = false;
+
+            celebration.active = false;
+            celebration.timer = 0;
+            celebration.fireworks = [];
+            celebration.confetti = [];
+            celebration.fireworkTimer = 0;
+            celebration.textScale = 0.3;
+            celebration.textAlpha = 0;
+            celebration.lightRays = [];
+            celebration.lightRayAngle = 0;
+            celebration.lightRaysTimer = 0;
+            celebration.bossDebris = [];
+
+            gameOver.active = false;
+            gameOver.timer = 0;
+            gameOver.debris = [];
+            gameOver.textAlpha = 0;
+            gameOver.textScale = 0.3;
+            gameOver.shakeX = 0;
+            gameOver.shakeY = 0;
+            gameOver.flashAlpha = 0;
+            gameOver.darkAlpha = 0;
+            gameOver.phrase = '';
+            gameOver.phraseAlpha = 0;
+            gameOver.phraseScale = 0.5;
+            gameOver.phraseTimer = 0;
+            gameOver.phraseIndex = 0;
+            gameOver.stats = null;
+            gameOver.statsAlpha = 0;
+            gameOver.statsSlide = 40;
+            gameOver.isNewRecord = false;
+            gameOver.recordGlow = 0;
         }
 
         // ============================================
@@ -625,7 +725,7 @@
         function getMoveSpeed() { return player.speedTime > 0 ? MOVE_SPEED * 1.6 : MOVE_SPEED; }
 
         function hitPlayer() {
-            if (win || paused) return;
+            if (win || paused || gameOver.active) return;
             if (player.shieldTime > 0) {
                 player.shieldTime = 0;
                 player.invuln = 60;
@@ -635,14 +735,13 @@
             }
             if (player.invuln > 0) return;
             lives--;
+            attemptDeaths++;
             hurtFlash = 20;
             Sound.hurt();
             spawnParticles(player.x + player.w/2, player.y + player.h/2, '#E53935', 15);
             if (lives <= 0) {
                 Sound.defeat();
-                lives = 3;
-                score = 0;
-                loadLevel(currentLevel);
+                startGameOver();
             } else {
                 player.x = SPAWN.x; player.y = SPAWN.y;
                 player.vx = 0; player.vy = 0;
@@ -673,6 +772,9 @@
                 setTimeout(() => {
                     currentLevel = 0;
                     score = 0; lives = 3;
+                    attemptCoins = 0;
+                    attemptStartTime = Date.now();
+                    attemptDeaths = 0;
                     loadLevel(0);
                     win = false;
                 }, 4000);
@@ -737,6 +839,7 @@
                             score += 100;
                             Sound.victory();
                             spawnParticles(boss.x + boss.w/2, boss.y + boss.h/2, '#FF5722', 60);
+                            startCelebration();
                             try { if (ysdk) ysdk.adv.showFullscreenAdv(); } catch(e) {}
                         }
                     } else {
@@ -773,10 +876,386 @@
         }
 
         // ============================================
+        // ЛОГИКА ПРАЗДНИКА (после победы над боссом)
+        // ============================================
+        function startCelebration() {
+            celebration.active = true;
+            celebration.timer = celebration.duration;
+            celebration.fireworks = [];
+            celebration.confetti = [];
+            celebration.fireworkTimer = 0;
+            celebration.textScale = 0.3;
+            celebration.textAlpha = 0;
+
+            const cx = boss.x + boss.w / 2;
+            const cy = boss.y + boss.h / 2;
+
+            // Взрыв босса на кусочки
+            for (let i = 0; i < 24; i++) {
+                const angle = (Math.PI * 2 / 24) * i + Math.random() * 0.3;
+                const speed = 4 + Math.random() * 6;
+                celebration.bossDebris.push({
+                    x: cx + (Math.random() - 0.5) * 30,
+                    y: cy + (Math.random() - 0.5) * 30,
+                    w: 12 + Math.random() * 20,
+                    h: 12 + Math.random() * 20,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 2,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.4,
+                    color: Math.random() < 0.5 ? '#C62828' : '#8E0000',
+                    life: 90,
+                    maxLife: 90
+                });
+            }
+            for (let i = 0; i < 6; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 3 + Math.random() * 4;
+                celebration.bossDebris.push({
+                    x: cx + (Math.random() - 0.5) * 60,
+                    y: cy + (Math.random() - 0.5) * 60,
+                    w: 20 + Math.random() * 15,
+                    h: 20 + Math.random() * 15,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 3,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.5,
+                    color: '#4A0000',
+                    life: 120,
+                    maxLife: 120
+                });
+            }
+
+            // Первая волна лучей света
+            celebration.lightRayAngle = 0;
+            celebration.lightRaysTimer = 0;
+            for (let i = 0; i < 8; i++) {
+                celebration.lightRays.push({
+                    angle: (Math.PI * 2 / 8) * i,
+                    length: 0,
+                    maxLength: 300 + Math.random() * 200,
+                    width: 20 + Math.random() * 20,
+                    life: 60,
+                    maxLife: 60,
+                    speed: 15 + Math.random() * 10
+                });
+            }
+
+            // Конфетти
+            for (let i = 0; i < 120; i++) {
+                celebration.confetti.push({
+                    x: Math.random() * W,
+                    y: -20 - Math.random() * 200,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: 1 + Math.random() * 3,
+                    w: 6 + Math.random() * 8,
+                    h: 10 + Math.random() * 12,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.2,
+                    color: ['#FFD700', '#FF5252', '#4FC3F7', '#69F0AE', '#E040FB', '#FFAB40', '#FFFFFF'][Math.floor(Math.random() * 7)],
+                    life: 240,
+                    maxLife: 240
+                });
+            }
+        }
+
+        function spawnFirework(x, y, color) {
+            const count = 30;
+            for (let i = 0; i < count; i++) {
+                const angle = (Math.PI * 2 / count) * i + Math.random() * 0.1;
+                const speed = 2 + Math.random() * 3;
+                celebration.fireworks.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 60,
+                    maxLife: 60,
+                    color: color,
+                    size: 3 + Math.random() * 3
+                });
+            }
+        }
+
+        function updateCelebration() {
+            if (!celebration.active) return;
+
+            celebration.timer--;
+
+            if (celebration.textScale < 1) {
+                celebration.textScale += 0.05;
+                if (celebration.textScale > 1) celebration.textScale = 1;
+            }
+            if (celebration.textAlpha < 1) {
+                celebration.textAlpha += 0.03;
+                if (celebration.textAlpha > 1) celebration.textAlpha = 1;
+            }
+
+            // Лучи света
+            celebration.lightRayAngle += 0.02;
+            for (let i = celebration.lightRays.length - 1; i >= 0; i--) {
+                const r = celebration.lightRays[i];
+                r.length += r.speed;
+                r.life--;
+                if (r.life <= 0) celebration.lightRays.splice(i, 1);
+            }
+            celebration.lightRaysTimer--;
+            if (celebration.lightRaysTimer <= 0 && celebration.timer > 120) {
+                celebration.lightRaysTimer = 100;
+                const rayCount = 6 + Math.floor(Math.random() * 4);
+                const offsetAngle = Math.random() * Math.PI * 2;
+                for (let i = 0; i < rayCount; i++) {
+                    celebration.lightRays.push({
+                        angle: offsetAngle + (Math.PI * 2 / rayCount) * i,
+                        length: 0,
+                        maxLength: 250 + Math.random() * 250,
+                        width: 15 + Math.random() * 25,
+                        life: 55,
+                        maxLife: 55,
+                        speed: 14 + Math.random() * 12
+                    });
+                }
+            }
+
+            // Осколки босса
+            for (let i = celebration.bossDebris.length - 1; i >= 0; i--) {
+                const d = celebration.bossDebris[i];
+                d.x += d.vx;
+                d.y += d.vy;
+                d.vy += 0.25;
+                d.vx *= 0.98;
+                d.rotation += d.rotSpeed;
+                d.life--;
+                if (d.y > H - 40 && d.vy > 0) {
+                    d.y = H - 40;
+                    d.vy *= -0.4;
+                    d.vx *= 0.7;
+                }
+                if (d.life <= 0) celebration.bossDebris.splice(i, 1);
+            }
+
+            // Салюты
+            celebration.fireworkTimer--;
+            if (celebration.fireworkTimer <= 0 && celebration.timer > 60) {
+                celebration.fireworkTimer = 25 + Math.random() * 20;
+                const colors = ['#FFD700', '#FF5252', '#4FC3F7', '#69F0AE', '#E040FB', '#FFAB40'];
+                spawnFirework(
+                    100 + Math.random() * (W - 200),
+                    80 + Math.random() * (H / 2),
+                    colors[Math.floor(Math.random() * colors.length)]
+                );
+                Sound.coin();
+            }
+
+            for (let i = celebration.fireworks.length - 1; i >= 0; i--) {
+                const f = celebration.fireworks[i];
+                f.x += f.vx;
+                f.y += f.vy;
+                f.vy += 0.12;
+                f.vx *= 0.98;
+                f.life--;
+                if (f.life <= 0) celebration.fireworks.splice(i, 1);
+            }
+
+            // Конфетти
+            for (let i = celebration.confetti.length - 1; i >= 0; i--) {
+                const c = celebration.confetti[i];
+                c.x += c.vx + Math.sin((Date.now() / 300) + i) * 0.5;
+                c.y += c.vy;
+                c.rotation += c.rotSpeed;
+                c.life--;
+                if (c.life <= 0 || c.y > H + 40) celebration.confetti.splice(i, 1);
+            }
+
+            if (celebration.timer <= 0) {
+                celebration.active = false;
+            }
+        }
+
+        // ============================================
+        // ЛОГИКА ПРОИГРЫША
+        // ============================================
+        function startGameOver() {
+            gameOver.active = true;
+            gameOver.timer = gameOver.duration;
+            gameOver.debris = [];
+            gameOver.textAlpha = 0;
+            gameOver.textScale = 0.3;
+            gameOver.flashAlpha = 1;
+            gameOver.darkAlpha = 0;
+
+            const phrases = i18n[currentLang].phrases || i18n.ru.phrases;
+            gameOver.phrase = phrases[Math.floor(Math.random() * phrases.length)];
+            gameOver.phraseAlpha = 0;
+            gameOver.phraseScale = 0.5;
+            gameOver.phraseTimer = 0;
+            gameOver.phraseIndex = 0;
+
+            const elapsed = Math.floor((Date.now() - attemptStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            gameOver.stats = {
+                coins: attemptCoins,
+                score: score,
+                deaths: attemptDeaths,
+                time: mins + ':' + (secs < 10 ? '0' : '') + secs,
+                level: (currentLevel + 1) + '/' + LEVELS.length
+            };
+            gameOver.statsAlpha = 0;
+            gameOver.statsSlide = 40;
+
+            gameOver.isNewRecord = score > bestScore && score > 0;
+            gameOver.recordGlow = 0;
+
+            if (gameOver.isNewRecord) {
+                bestScore = score;
+                saveProgress();
+                submitLeaderboard(score);
+                setTimeout(() => Sound.bonus(), 400);
+            }
+
+            const cx = player.x + player.w / 2;
+            const cy = player.y + player.h / 2;
+
+            for (let i = 0; i < 28; i++) {
+                const angle = (Math.PI * 2 / 28) * i + Math.random() * 0.4;
+                const speed = 4 + Math.random() * 6;
+                gameOver.debris.push({
+                    x: cx + (Math.random() - 0.5) * 20,
+                    y: cy + (Math.random() - 0.5) * 20,
+                    w: 8 + Math.random() * 14,
+                    h: 8 + Math.random() * 14,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 3,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.5,
+                    color: Math.random() < 0.6 ? '#1E88E5' : '#0D47A1',
+                    life: 120,
+                    maxLife: 120
+                });
+            }
+            for (let i = 0; i < 4; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                gameOver.debris.push({
+                    x: cx, y: cy,
+                    w: 8, h: 8,
+                    vx: Math.cos(angle) * (5 + Math.random() * 3),
+                    vy: Math.sin(angle) * (5 + Math.random() * 3) - 4,
+                    rotation: 0,
+                    rotSpeed: (Math.random() - 0.5) * 0.6,
+                    color: '#FFFFFF',
+                    life: 130,
+                    maxLife: 130
+                });
+            }
+
+            for (let i = 0; i < 20; i++) {
+                spawnParticles(cx, cy, '#FF5252', 1);
+            }
+        }
+
+        function updateGameOver() {
+            if (!gameOver.active) return;
+
+            gameOver.timer--;
+
+            if (gameOver.flashAlpha > 0) {
+                gameOver.flashAlpha -= 0.07;
+                if (gameOver.flashAlpha < 0) gameOver.flashAlpha = 0;
+            }
+
+            if (gameOver.darkAlpha < 0.75 && gameOver.timer < gameOver.duration - 20) {
+                gameOver.darkAlpha += 0.025;
+                if (gameOver.darkAlpha > 0.75) gameOver.darkAlpha = 0.75;
+            }
+
+            const shakeStrength = Math.max(0, (gameOver.timer / gameOver.duration) * 12);
+            gameOver.shakeX = (Math.random() - 0.5) * shakeStrength;
+            gameOver.shakeY = (Math.random() - 0.5) * shakeStrength;
+
+            if (gameOver.timer < gameOver.duration - 30) {
+                if (gameOver.textAlpha < 1) {
+                    gameOver.textAlpha += 0.05;
+                    if (gameOver.textAlpha > 1) gameOver.textAlpha = 1;
+                }
+                if (gameOver.textScale < 1) {
+                    gameOver.textScale += 0.06;
+                    if (gameOver.textScale > 1) gameOver.textScale = 1;
+                }
+            }
+
+            if (gameOver.timer < gameOver.duration - 60) {
+                if (gameOver.phraseAlpha < 1) {
+                    gameOver.phraseAlpha += 0.06;
+                    if (gameOver.phraseAlpha > 1) gameOver.phraseAlpha = 1;
+                }
+                if (gameOver.phraseScale < 1) {
+                    gameOver.phraseScale += 0.08;
+                    if (gameOver.phraseScale > 1) gameOver.phraseScale = 1;
+                }
+
+                gameOver.phraseTimer++;
+                if (gameOver.phraseTimer >= gameOver.phraseDuration) {
+                    gameOver.phraseTimer = 0;
+                    const phrases = i18n[currentLang].phrases || i18n.ru.phrases;
+                    gameOver.phraseIndex = (gameOver.phraseIndex + 1) % phrases.length;
+                    gameOver.phrase = phrases[gameOver.phraseIndex];
+                    gameOver.phraseAlpha = 0;
+                    gameOver.phraseScale = 0.6;
+                }
+            }
+
+            if (gameOver.timer < gameOver.duration - 90) {
+                if (gameOver.statsAlpha < 1) {
+                    gameOver.statsAlpha += 0.05;
+                    if (gameOver.statsAlpha > 1) gameOver.statsAlpha = 1;
+                }
+                if (gameOver.statsSlide > 0) {
+                    gameOver.statsSlide -= 2;
+                    if (gameOver.statsSlide < 0) gameOver.statsSlide = 0;
+                }
+            }
+
+            if (gameOver.isNewRecord && gameOver.statsAlpha > 0.5) {
+                gameOver.recordGlow += 0.1;
+            }
+
+            for (let i = gameOver.debris.length - 1; i >= 0; i--) {
+                const d = gameOver.debris[i];
+                d.x += d.vx;
+                d.y += d.vy;
+                d.vy += 0.28;
+                d.vx *= 0.98;
+                d.rotation += d.rotSpeed;
+                d.life--;
+                if (d.y > H - 40 && d.vy > 0) {
+                    d.y = H - 40;
+                    d.vy *= -0.35;
+                    d.vx *= 0.7;
+                }
+                if (d.life <= 0) gameOver.debris.splice(i, 1);
+            }
+
+            if (gameOver.timer <= 0) {
+                gameOver.active = false;
+                lives = 3;
+                score = 0;
+                attemptCoins = 0;
+                attemptStartTime = Date.now();
+                attemptDeaths = 0;
+                loadLevel(currentLevel);
+            }
+        }
+
+        // ============================================
         // ОБНОВЛЕНИЕ
         // ============================================
         function update() {
             if (paused) return;
+
+            if (gameOver.active) {
+                updateGameOver();
+                return;
+            }
 
             if (player.invuln > 0) player.invuln--;
             if (hurtFlash > 0) hurtFlash--;
@@ -878,6 +1357,7 @@
                 if (!c.collected && circleRectCollide(c.x, c.y, c.r, player)) {
                     c.collected = true;
                     score += 10;
+                    attemptCoins++;
                     Sound.coin();
                     spawnParticles(c.x, c.y, '#FFD700', 12);
                 }
@@ -906,6 +1386,7 @@
 
             if (boss.active) updateBoss();
             updateBossProjectiles();
+            updateCelebration();
 
             const bossOk = currentLevel !== 1 || bossDefeated;
             if (!win && rectsCollide(player, flag) && collected === TOTAL_COINS && bossOk) onWin();
@@ -914,12 +1395,18 @@
         // ============================================
         // ОТРИСОВКА
         // ============================================
+        const BONUS_COLORS = { shield: '#2196F3', speed: '#FFC107', heart: '#E91E63', magnet: '#9C27B0', slow: '#00BCD4' };
+        const BONUS_ICONS  = { shield: '🛡', speed: '⚡', heart: '♥', magnet: '🧲', slow: '🐢' };
+
         function draw() {
+            ctx.save();
+            ctx.translate(gameOver.shakeX, gameOver.shakeY);
+
             const grad = ctx.createLinearGradient(0, 0, 0, H);
             if (currentLevel === 0) { grad.addColorStop(0, '#87CEEB'); grad.addColorStop(1, '#E0F6FF'); }
             else { grad.addColorStop(0, '#5B2C6F'); grad.addColorStop(1, '#F5B7B1'); }
             ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, W, H);
+            ctx.fillRect(-50, -50, W + 100, H + 100);
 
             ctx.fillStyle = currentLevel === 0 ? '#FFE066' : '#FFB74D';
             ctx.beginPath(); ctx.arc(W - 80, 80, 45, 0, Math.PI * 2); ctx.fill();
@@ -965,7 +1452,7 @@
             }
             ctx.globalAlpha = 1;
 
-            drawPlayer();
+            if (!gameOver.active) drawPlayer();
 
             ctx.fillStyle = 'rgba(0,0,0,0.5)';
             ctx.fillRect(10, 10, 340, 40);
@@ -981,7 +1468,7 @@
 
             drawEffects();
 
-            if (score === 0 && !win && lives === 3 && player.invuln < 30) {
+            if (score === 0 && !win && lives === 3 && player.invuln < 30 && !gameOver.active) {
                 ctx.fillStyle = 'rgba(0,0,0,0.6)';
                 ctx.fillRect(W/2 - 280, H - 140, 560, 40);
                 ctx.fillStyle = '#fff';
@@ -992,17 +1479,19 @@
 
             if (hurtFlash > 0) {
                 ctx.fillStyle = 'rgba(255,0,0,' + (hurtFlash / 40) + ')';
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(-50, -50, W + 100, H + 100);
             }
 
             if (player.slowTime > 0) {
                 ctx.fillStyle = 'rgba(0,188,212,0.08)';
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(-50, -50, W + 100, H + 100);
             }
+
+            drawCelebration();
 
             if (win) {
                 ctx.fillStyle = 'rgba(0,0,0,0.7)';
-                ctx.fillRect(0, 0, W, H);
+                ctx.fillRect(-50, -50, W + 100, H + 100);
                 ctx.fillStyle = '#FFD700';
                 ctx.font = 'bold 52px Arial';
                 ctx.textAlign = 'center';
@@ -1020,10 +1509,11 @@
                     ctx.fillText(t('nextLevel'), W/2, H/2 + 40);
                 }
             }
-        }
 
-        const BONUS_COLORS = { shield: '#2196F3', speed: '#FFC107', heart: '#E91E63', magnet: '#9C27B0', slow: '#00BCD4' };
-        const BONUS_ICONS  = { shield: '🛡', speed: '⚡', heart: '♥', magnet: '🧲', slow: '🐢' };
+            drawGameOver();
+
+            ctx.restore();
+        }
 
         function drawBonus(b) {
             const by = b.y + Math.sin(Date.now() / 300 + b.phase) * 4;
@@ -1251,6 +1741,347 @@
                 ctx.beginPath();
                 ctx.arc(p.x - 2, p.y - 2, p.r * 0.5, 0, Math.PI*2);
                 ctx.fill();
+            }
+        }
+
+        function drawCelebration() {
+            if (!celebration.active) return;
+
+            // Лучи света
+            const centerX = W / 2;
+            const centerY = 120;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            for (const r of celebration.lightRays) {
+                const alpha = (r.life / r.maxLife) * 0.55;
+                const angle = r.angle + celebration.lightRayAngle;
+
+                ctx.save();
+                ctx.translate(centerX, centerY);
+                ctx.rotate(angle);
+
+                const grad = ctx.createLinearGradient(0, 0, r.length, 0);
+                grad.addColorStop(0, 'rgba(255, 255, 200, ' + alpha + ')');
+                grad.addColorStop(0.4, 'rgba(255, 220, 100, ' + (alpha * 0.7) + ')');
+                grad.addColorStop(1, 'rgba(255, 180, 50, 0)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(0, -r.width / 2);
+                ctx.lineTo(r.length, -r.width * 0.15);
+                ctx.lineTo(r.length, r.width * 0.15);
+                ctx.lineTo(0, r.width / 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.restore();
+
+            // Осколки босса
+            for (const d of celebration.bossDebris) {
+                const alpha = Math.min(1, d.life / 30);
+                ctx.globalAlpha = alpha;
+                ctx.save();
+                ctx.translate(d.x, d.y);
+                ctx.rotate(d.rotation);
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(-d.w / 2 + 2, -d.h / 2 + 2, d.w, d.h);
+                ctx.fillStyle = d.color;
+                ctx.fillRect(-d.w / 2, -d.h / 2, d.w, d.h);
+                ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-d.w / 2, -d.h / 2, d.w, d.h);
+                ctx.fillStyle = 'rgba(255,255,255,0.25)';
+                ctx.fillRect(-d.w / 2, -d.h / 2, d.w * 0.4, d.h * 0.3);
+                ctx.restore();
+            }
+            ctx.globalAlpha = 1;
+
+            // Салюты
+            for (const f of celebration.fireworks) {
+                const alpha = f.life / f.maxLife;
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = f.color;
+                ctx.beginPath();
+                ctx.arc(f.x, f.y, f.size * alpha, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = alpha * 0.6;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(f.x - 1, f.y - 1, f.size * alpha * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Конфетти
+            for (const c of celebration.confetti) {
+                const alpha = Math.min(1, c.life / 60);
+                ctx.globalAlpha = alpha;
+                ctx.save();
+                ctx.translate(c.x, c.y);
+                ctx.rotate(c.rotation);
+                ctx.fillStyle = c.color;
+                ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(-c.w / 2, -c.h / 2, c.w, c.h);
+                ctx.restore();
+            }
+            ctx.globalAlpha = 1;
+
+            // Текст «БОСС ПОБЕЖДЁН!»
+            if (celebration.textAlpha > 0) {
+                const txt = t('bossDefeated');
+                ctx.save();
+                ctx.translate(W / 2, H / 2 - 50);
+                ctx.scale(celebration.textScale, celebration.textScale);
+                ctx.globalAlpha = celebration.textAlpha;
+                ctx.font = 'bold 72px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                ctx.lineWidth = 12;
+                ctx.strokeStyle = '#0D47A1';
+                ctx.strokeText(txt, 0, 0);
+
+                const grad = ctx.createLinearGradient(0, -40, 0, 40);
+                grad.addColorStop(0, '#FFEB3B');
+                grad.addColorStop(0.5, '#FFD700');
+                grad.addColorStop(1, '#FF9800');
+                ctx.fillStyle = grad;
+                ctx.fillText(txt, 0, 0);
+
+                ctx.font = 'bold 32px Arial';
+                ctx.lineWidth = 8;
+                ctx.strokeStyle = '#0D47A1';
+                ctx.strokeText('+100 ' + (currentLang === 'en' ? 'POINTS' : 'ОЧКОВ'), 0, 70);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillText('+100 ' + (currentLang === 'en' ? 'POINTS' : 'ОЧКОВ'), 0, 70);
+
+                ctx.restore();
+            }
+        }
+
+        function drawGameOver() {
+            if (!gameOver.active) return;
+
+            // Осколки персонажа
+            for (const d of gameOver.debris) {
+                const alpha = Math.min(1, d.life / 30);
+                ctx.globalAlpha = alpha;
+                ctx.save();
+                ctx.translate(d.x, d.y);
+                ctx.rotate(d.rotation);
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.fillRect(-d.w / 2 + 2, -d.h / 2 + 2, d.w, d.h);
+                ctx.fillStyle = d.color;
+                ctx.fillRect(-d.w / 2, -d.h / 2, d.w, d.h);
+                ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(-d.w / 2, -d.h / 2, d.w, d.h);
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fillRect(-d.w / 2, -d.h / 2, d.w * 0.35, d.h * 0.3);
+                ctx.restore();
+            }
+            ctx.globalAlpha = 1;
+
+            // Затемнение
+            if (gameOver.darkAlpha > 0) {
+                ctx.fillStyle = 'rgba(0,0,0,' + gameOver.darkAlpha + ')';
+                ctx.fillRect(-50, -50, W + 100, H + 100);
+            }
+
+            // Красная вспышка
+            if (gameOver.flashAlpha > 0) {
+                ctx.fillStyle = 'rgba(255,30,30,' + gameOver.flashAlpha + ')';
+                ctx.fillRect(-50, -50, W + 100, H + 100);
+            }
+
+            // Надпись «ИГРА ОКОНЧЕНА»
+            if (gameOver.textAlpha > 0) {
+                ctx.save();
+                ctx.translate(W / 2, H / 2);
+                ctx.scale(gameOver.textScale, gameOver.textScale);
+                ctx.globalAlpha = gameOver.textAlpha;
+
+                const txt = t('gameOver');
+                ctx.font = 'bold 88px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                ctx.lineWidth = 14;
+                ctx.strokeStyle = '#000';
+                ctx.strokeText(txt, 0, 0);
+
+                ctx.lineWidth = 8;
+                ctx.strokeStyle = '#7F0000';
+                ctx.strokeText(txt, 0, 0);
+
+                const textGrad = ctx.createLinearGradient(0, -50, 0, 50);
+                textGrad.addColorStop(0, '#FF5252');
+                textGrad.addColorStop(0.5, '#E53935');
+                textGrad.addColorStop(1, '#B71C1C');
+                ctx.fillStyle = textGrad;
+                ctx.fillText(txt, 0, 0);
+
+                ctx.restore();
+            }
+
+            // Случайная фраза
+            if (gameOver.phraseAlpha > 0) {
+                ctx.save();
+                ctx.translate(W / 2, H / 2 + 80);
+                ctx.scale(gameOver.phraseScale, gameOver.phraseScale);
+                ctx.globalAlpha = gameOver.phraseAlpha;
+
+                ctx.font = 'bold 32px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                ctx.lineWidth = 8;
+                ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                ctx.strokeText(gameOver.phrase, 0, 0);
+
+                const phraseGrad = ctx.createLinearGradient(0, -20, 0, 20);
+                phraseGrad.addColorStop(0, '#FFF59D');
+                phraseGrad.addColorStop(1, '#FFC107');
+                ctx.fillStyle = phraseGrad;
+                ctx.fillText(gameOver.phrase, 0, 0);
+
+                ctx.restore();
+            }
+
+            // Подпись «Перезапуск...» — мигает
+            if (gameOver.textAlpha > 0 && Math.floor(Date.now() / 400) % 2 === 0) {
+                ctx.save();
+                ctx.globalAlpha = gameOver.textAlpha * 0.9;
+                ctx.font = 'bold 22px Arial';
+                ctx.textAlign = 'center';
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = '#000';
+                ctx.strokeText(t('restart'), W / 2, H - 30);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillText(t('restart'), W / 2, H - 30);
+                ctx.restore();
+            }
+
+            // Панель со статистикой
+            if (gameOver.statsAlpha > 0 && gameOver.stats) {
+                const panelW = 340;
+                const panelH = 270;
+                const panelX = W / 2 - panelW / 2;
+                const panelY = 60 - gameOver.statsSlide;
+
+                ctx.save();
+                ctx.globalAlpha = gameOver.statsAlpha;
+
+                // Фон панели
+                ctx.fillStyle = 'rgba(15, 20, 40, 0.85)';
+                ctx.beginPath();
+                if (ctx.roundRect) {
+                    ctx.roundRect(panelX, panelY, panelW, panelH, 16);
+                } else {
+                    ctx.rect(panelX, panelY, panelW, panelH);
+                }
+                ctx.fill();
+
+                // Обводка
+                ctx.strokeStyle = '#FFC107';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                if (ctx.roundRect) {
+                    ctx.roundRect(panelX, panelY, panelW, panelH, 16);
+                } else {
+                    ctx.rect(panelX, panelY, panelW, panelH);
+                }
+                ctx.stroke();
+
+                // Заголовок
+                ctx.font = 'bold 22px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#FFC107';
+                ctx.fillText('📊 ' + t('statsTitle'), W / 2, panelY + 35);
+
+                // Разделитель
+                ctx.strokeStyle = 'rgba(255,193,7,0.4)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(panelX + 20, panelY + 50);
+                ctx.lineTo(panelX + panelW - 20, panelY + 50);
+                ctx.stroke();
+
+                // Строки
+                const rowY = panelY + 80;
+                const rowGap = 30;
+                const labelX = panelX + 25;
+                const valueX = panelX + panelW - 25;
+
+                ctx.font = '17px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillStyle = '#E0E0E0';
+                ctx.fillText('🪙 ' + t('statsCoins'), labelX, rowY);
+                ctx.fillText('⭐ ' + t('statsScore'), labelX, rowY + rowGap);
+                ctx.fillText('💀 ' + t('statsDeaths'), labelX, rowY + rowGap * 2);
+                ctx.fillText('⏱ ' + t('statsTime'), labelX, rowY + rowGap * 3);
+                ctx.fillText('📍 ' + t('statsLevel'), labelX, rowY + rowGap * 4);
+
+                ctx.textAlign = 'right';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillStyle = '#FFD700';
+                ctx.fillText(gameOver.stats.coins + ' / ' + TOTAL_COINS, valueX, rowY);
+                ctx.fillStyle = '#81D4FA';
+                ctx.fillText(String(gameOver.stats.score), valueX, rowY + rowGap);
+                ctx.fillStyle = '#FF8A80';
+                ctx.fillText(String(gameOver.stats.deaths), valueX, rowY + rowGap * 2);
+                ctx.fillStyle = '#A5D6A7';
+                ctx.fillText(gameOver.stats.time, valueX, rowY + rowGap * 3);
+                ctx.fillStyle = '#CE93D8';
+                ctx.fillText(gameOver.stats.level, valueX, rowY + rowGap * 4);
+
+                // Разделитель перед рекордом
+                ctx.strokeStyle = 'rgba(255,193,7,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(panelX + 20, rowY + rowGap * 4 + 18);
+                ctx.lineTo(panelX + panelW - 20, rowY + rowGap * 4 + 18);
+                ctx.stroke();
+
+                // Строка рекорда
+                const recordY = rowY + rowGap * 5;
+                const pulse = gameOver.isNewRecord
+                    ? 1 + Math.sin(gameOver.recordGlow) * 0.15
+                    : 1;
+
+                ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'left';
+                if (gameOver.isNewRecord) {
+                    const glowAlpha = 0.7 + Math.sin(gameOver.recordGlow * 2) * 0.3;
+                    ctx.fillStyle = `rgba(255, 215, 0, ${glowAlpha})`;
+                    ctx.fillText('🏅 ' + t('newRecord'), labelX, recordY);
+                } else {
+                    ctx.fillStyle = '#B0BEC5';
+                    ctx.fillText('🏅 ' + t('statsRecord'), labelX, recordY);
+                }
+
+                // Значение рекорда
+                ctx.save();
+                ctx.translate(valueX, recordY);
+                ctx.scale(pulse, pulse);
+                ctx.textAlign = 'right';
+                ctx.font = 'bold 20px Arial';
+                ctx.fillStyle = gameOver.isNewRecord ? '#FFD700' : '#FFECB3';
+                ctx.fillText(String(bestScore), 0, 0);
+
+                if (gameOver.isNewRecord) {
+                    const glowAlpha = 0.4 + Math.sin(gameOver.recordGlow * 2) * 0.3;
+                    ctx.shadowColor = `rgba(255, 215, 0, ${glowAlpha})`;
+                    ctx.shadowBlur = 20;
+                    ctx.fillText(String(bestScore), 0, 0);
+                    ctx.shadowBlur = 0;
+                }
+                ctx.restore();
+
+                ctx.restore();
             }
         }
 

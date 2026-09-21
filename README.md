@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -10,6 +11,10 @@
             width: 100%; height: 100%;
             overflow: hidden; background: #222;
             font-family: Arial, sans-serif; touch-action: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
         canvas { display: block; margin: 0 auto; background: #87CEEB; image-rendering: pixelated; }
         #controls {
@@ -35,6 +40,15 @@
             cursor: pointer; font-size: 15px; z-index: 20;
         }
         #lb-btn:hover { background: rgba(0,0,0,0.8); }
+        #sound-btn {
+            position: fixed; top: 15px; left: 15px;
+            width: 50px; height: 50px;
+            padding: 0; background: rgba(0,0,0,0.5);
+            color: #fff; border: 2px solid #fff; border-radius: 50%;
+            cursor: pointer; font-size: 22px; z-index: 20;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #sound-btn:hover { background: rgba(0,0,0,0.8); }
         #lb-modal {
             position: fixed; inset: 0; display: none;
             background: rgba(0,0,0,0.85); z-index: 30;
@@ -63,13 +77,14 @@
 </head>
 <body>
     <canvas id="game"></canvas>
-    <button id="lb-btn">🏆 Лидеры</button>
+    <button id="sound-btn" title="Звук">🔊</button>
+    <button id="lb-btn">🏆 <span data-i18n="leaders">Лидеры</span></button>
 
     <div id="lb-modal">
         <div id="lb-box">
-            <h2>🏆 Рекорды</h2>
-            <div id="lb-content"><div id="lb-loading">Загрузка...</div></div>
-            <button id="lb-close">Закрыть</button>
+            <h2>🏆 <span data-i18n="records">Рекорды</span></h2>
+            <div id="lb-content"><div id="lb-loading" data-i18n="loading">Загрузка...</div></div>
+            <button id="lb-close" data-i18n="close">Закрыть</button>
         </div>
     </div>
 
@@ -84,11 +99,205 @@
     <script src="https://yandex.ru/games/sdk/v2"></script>
     <script>
         // ============================================
+        // ЗВУКОВОЙ ДВИЖОК (Web Audio API)
+        // ============================================
+        const Sound = (() => {
+            let actx = null;
+            let masterGain = null;
+            let musicGain = null;
+            let sfxGain = null;
+            let enabled = true;
+            let unlocked = false;
+            let musicTimer = null;
+            let musicPlaying = false;
+
+            function init() {
+                if (actx) return;
+                try {
+                    actx = new (window.AudioContext || window.webkitAudioContext)();
+                    masterGain = actx.createGain();
+                    masterGain.gain.value = 0.6;
+                    masterGain.connect(actx.destination);
+
+                    musicGain = actx.createGain();
+                    musicGain.gain.value = 0.15;
+                    musicGain.connect(masterGain);
+
+                    sfxGain = actx.createGain();
+                    sfxGain.gain.value = 0.5;
+                    sfxGain.connect(masterGain);
+                } catch(e) { console.warn('AudioContext error:', e); }
+            }
+
+            function unlock() {
+                init();
+                if (!actx) return;
+                if (actx.state === 'suspended') actx.resume();
+                unlocked = true;
+            }
+
+            function tone(freq, duration, type = 'sine', vol = 1, dest = null, slideTo = null) {
+                if (!enabled || !unlocked || !actx) return;
+                try {
+                    const osc = actx.createOscillator();
+                    const g = actx.createGain();
+                    osc.type = type;
+                    osc.frequency.value = freq;
+                    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, actx.currentTime + duration);
+                    g.gain.setValueAtTime(0, actx.currentTime);
+                    g.gain.linearRampToValueAtTime(vol, actx.currentTime + 0.01);
+                    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + duration);
+                    osc.connect(g);
+                    g.connect(dest || sfxGain);
+                    osc.start();
+                    osc.stop(actx.currentTime + duration + 0.05);
+                } catch(e) {}
+            }
+
+            function noise(duration, vol = 0.3) {
+                if (!enabled || !unlocked || !actx) return;
+                try {
+                    const bufferSize = actx.sampleRate * duration;
+                    const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                    const src = actx.createBufferSource();
+                    src.buffer = buffer;
+                    const g = actx.createGain();
+                    g.gain.setValueAtTime(vol, actx.currentTime);
+                    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + duration);
+                    src.connect(g);
+                    g.connect(sfxGain);
+                    src.start();
+                } catch(e) {}
+            }
+
+            function jump() { tone(520, 0.15, 'square', 0.4, null, 880); }
+            function doubleJump() { tone(680, 0.18, 'square', 0.4, null, 1100); }
+            function coin() {
+                tone(880, 0.08, 'sine', 0.5);
+                setTimeout(() => tone(1320, 0.12, 'sine', 0.5), 60);
+            }
+            function bonus() {
+                tone(523, 0.1, 'triangle', 0.5);
+                setTimeout(() => tone(659, 0.1, 'triangle', 0.5), 80);
+                setTimeout(() => tone(784, 0.15, 'triangle', 0.5), 160);
+            }
+            function hurt() {
+                noise(0.25, 0.4);
+                tone(200, 0.3, 'sawtooth', 0.3, null, 80);
+            }
+            function stomp() {
+                tone(300, 0.12, 'square', 0.5, null, 150);
+                setTimeout(() => tone(600, 0.1, 'square', 0.4), 60);
+            }
+            function bossShoot() { tone(180, 0.2, 'sawtooth', 0.35, null, 90); }
+            function victory() {
+                [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.2, 'triangle', 0.6), i * 120));
+            }
+            function defeat() {
+                [440, 349, 262, 196].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'sawtooth', 0.5), i * 150));
+            }
+
+            const melody = [
+                262, 330, 392, 330, 262, 330, 392, 523,
+                440, 392, 330, 262, 294, 330, 262, 220
+            ];
+            let melodyIdx = 0;
+            function playMusicNote() {
+                if (!enabled || !unlocked || !actx) return;
+                const f = melody[melodyIdx % melody.length];
+                melodyIdx++;
+                tone(f, 0.35, 'triangle', 0.4, musicGain);
+                if (melodyIdx % 4 === 1) tone(f / 2, 0.6, 'sine', 0.5, musicGain);
+            }
+            function startMusic() {
+                if (musicPlaying) return;
+                musicPlaying = true;
+                melodyIdx = 0;
+                playMusicNote();
+                musicTimer = setInterval(playMusicNote, 380);
+            }
+            function stopMusic() {
+                musicPlaying = false;
+                if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+            }
+            function toggle() {
+                enabled = !enabled;
+                if (masterGain) masterGain.gain.value = enabled ? 0.6 : 0;
+                return enabled;
+            }
+            function pauseAll() { if (masterGain) masterGain.gain.value = 0; }
+            function resumeAll() { if (masterGain) masterGain.gain.value = enabled ? 0.6 : 0; }
+
+            return {
+                init, unlock, toggle, pauseAll, resumeAll,
+                jump, doubleJump, coin, bonus, hurt, stomp, bossShoot,
+                victory, defeat, startMusic, stopMusic
+            };
+        })();
+
+        // Разблокировка звука при первом действии
+        function firstInteraction() {
+            Sound.unlock();
+            Sound.startMusic();
+            document.removeEventListener('pointerdown', firstInteraction);
+            document.removeEventListener('keydown', firstInteraction);
+            document.removeEventListener('touchstart', firstInteraction);
+        }
+        document.addEventListener('pointerdown', firstInteraction);
+        document.addEventListener('keydown', firstInteraction);
+        document.addEventListener('touchstart', firstInteraction);
+
+        // Кнопка звука
+        document.getElementById('sound-btn').addEventListener('click', () => {
+            Sound.unlock();
+            const on = Sound.toggle();
+            document.getElementById('sound-btn').textContent = on ? '🔊' : '🔇';
+            if (on) Sound.startMusic(); else Sound.stopMusic();
+        });
+
+        // ============================================
+        // ЛОКАЛИЗАЦИЯ
+        // ============================================
+        const i18n = {
+            ru: {
+                leaders: 'Лидеры', records: 'Рекорды', loading: 'Загрузка...', close: 'Закрыть',
+                noRecords: 'Пока нет рекордов', lbUnavailable: 'Лидерборд недоступен',
+                lbError: 'Ошибка загрузки', player: 'Игрок', level: 'Уровень',
+                passed: 'ПРОЙДЕН!', allPassed: 'ВСЕ УРОВНИ ПРОЙДЕНЫ!',
+                score: 'Очки', record: 'Рекорд', nextLevel: 'Загрузка следующего уровня...',
+                hint: '🔼×2 двойной прыжок · 🧲 магнит · 🐢 замедление · 👹 босс на 2-м уровне',
+                boss: 'БОСС',
+                shield: 'Щит', speed: 'Ускорение', heart: 'Жизнь', magnet: 'Магнит', slow: 'Замедление'
+            },
+            en: {
+                leaders: 'Leaders', records: 'Records', loading: 'Loading...', close: 'Close',
+                noRecords: 'No records yet', lbUnavailable: 'Leaderboard unavailable',
+                lbError: 'Loading error', player: 'Player', level: 'Level',
+                passed: 'PASSED!', allPassed: 'ALL LEVELS PASSED!',
+                score: 'Score', record: 'Record', nextLevel: 'Loading next level...',
+                hint: '🔼×2 double jump · 🧲 magnet · 🐢 slow-mo · 👹 boss on level 2',
+                boss: 'BOSS',
+                shield: 'Shield', speed: 'Speed', heart: 'Life', magnet: 'Magnet', slow: 'Slow-mo'
+            }
+        };
+        let currentLang = 'ru';
+        function t(key) { return i18n[currentLang][key] || i18n.ru[key] || key; }
+        function applyLocalization() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                el.textContent = t(key);
+            });
+        }
+
+        // ============================================
         // YANDEX SDK
         // ============================================
         const LB_NAME = 'bestScore';
         let ysdk = null, ysdkPlayer = null, ysdkLB = null;
         let bestScore = 0, canSave = false;
+        let paused = false;
 
         function loadLocalBest() { try { return parseInt(localStorage.getItem('bestScore')) || 0; } catch(e){ return 0; } }
         function saveLocalBest(v) { try { localStorage.setItem('bestScore', v); } catch(e){} }
@@ -96,13 +305,47 @@
 
         YaGames.init().then(async sdk => {
             ysdk = sdk;
+
+            try {
+                const lang = ysdk.environment.i18n.lang;
+                currentLang = (lang === 'en') ? 'en' : 'ru';
+                applyLocalization();
+            } catch(e) {}
+
             try {
                 ysdkPlayer = await ysdk.getPlayer({ scopes: false });
                 canSave = true;
                 const data = await ysdkPlayer.getData(['bestScore']);
                 if (data && typeof data.bestScore === 'number') bestScore = Math.max(bestScore, data.bestScore);
             } catch(e) {}
+
             try { ysdkLB = await ysdk.getLeaderboards(); } catch(e) {}
+
+            const handlePause = () => {
+                paused = true;
+                Sound.pauseAll();
+                if (ysdk && ysdk.features && ysdk.features.GameplayAPI) {
+                    try { ysdk.features.GameplayAPI.stop(); } catch(e) {}
+                }
+            };
+            const handleResume = () => {
+                paused = false;
+                Sound.resumeAll();
+                if (ysdk && ysdk.features && ysdk.features.GameplayAPI) {
+                    try { ysdk.features.GameplayAPI.start(); } catch(e) {}
+                }
+            };
+            try {
+                ysdk.on('game_api_pause', handlePause);
+                ysdk.on('game_api_resume', handleResume);
+            } catch(e) {}
+
+            try {
+                ysdk.features.LoadingAPI.ready();
+                console.log('✅ Game Ready вызван');
+            } catch(e) {}
+
+            try { ysdk.features.GameplayAPI?.start(); } catch(e) {}
             try { ysdk.adv.showFullscreenAdv(); } catch(e) {}
         }).catch(e => console.log('SDK err:', e));
 
@@ -118,24 +361,28 @@
             const modal = document.getElementById('lb-modal');
             const content = document.getElementById('lb-content');
             modal.classList.add('active');
-            if (!ysdkLB) { content.innerHTML = '<div id="lb-loading">Лидерборд недоступен</div>'; return; }
-            content.innerHTML = '<div id="lb-loading">Загрузка...</div>';
+            if (!ysdkLB) { content.innerHTML = `<div id="lb-loading">${t('lbUnavailable')}</div>`; return; }
+            content.innerHTML = `<div id="lb-loading">${t('loading')}</div>`;
             try {
                 const r = await ysdkLB.getLeaderboardEntries(LB_NAME, { quantityTop: 10, includeUser: true, quantityAround: 3 });
                 let html = '';
-                if (!r.entries || r.entries.length === 0) html = '<div id="lb-loading">Пока нет рекордов</div>';
+                if (!r.entries || r.entries.length === 0) html = `<div id="lb-loading">${t('noRecords')}</div>`;
                 else r.entries.forEach(e => {
                     const self = r.userRank && e.rank === r.userRank;
+                    const name = (e.player && e.player.publicName) || t('player');
                     html += `<div class="lb-row ${self ? 'self' : ''}">
                         <span class="rank">#${e.rank}</span>
-                        <span>${(e.player && e.player.publicName) || 'Игрок'}</span>
+                        <span>${name}</span>
                         <span><b>${e.score}</b></span></div>`;
                 });
                 content.innerHTML = html;
-            } catch(e) { content.innerHTML = '<div id="lb-loading">Ошибка загрузки</div>'; }
+            } catch(e) { content.innerHTML = `<div id="lb-loading">${t('lbError')}</div>`; }
         }
         document.getElementById('lb-btn').addEventListener('click', showLeaderboard);
         document.getElementById('lb-close').addEventListener('click', () => document.getElementById('lb-modal').classList.remove('active'));
+
+        // Запрет контекстного меню
+        window.addEventListener('contextmenu', e => e.preventDefault());
 
         // ============================================
         // КАНВАС
@@ -243,7 +490,7 @@
         ];
 
         // ============================================
-        // ДИНАМИЧЕСКИЕ ПЕРЕМЕННЫЕ
+        // ПЕРЕМЕННЫЕ
         // ============================================
         let currentLevel = 0;
         let platforms = [], coins = [], bonuses = [], enemies = [], flag = null, SPAWN = null;
@@ -274,11 +521,8 @@
         const boss = {
             x: 0, y: 0, w: 80, h: 80,
             hp: 5, maxHp: 5,
-            vx: 1.8,
-            invuln: 0,
-            active: false,
-            shootTimer: 120,
-            hurtTimer: 0
+            vx: 1.8, invuln: 0,
+            active: false, shootTimer: 120, hurtTimer: 0
         };
         let bossProjectiles = [];
         let bossDefeated = false;
@@ -368,18 +612,21 @@
         function getMoveSpeed() { return player.speedTime > 0 ? MOVE_SPEED * 1.6 : MOVE_SPEED; }
 
         function hitPlayer() {
-            if (win) return;
+            if (win || paused) return;
             if (player.shieldTime > 0) {
                 player.shieldTime = 0;
                 player.invuln = 60;
+                Sound.hurt();
                 spawnParticles(player.x + player.w/2, player.y + player.h/2, '#2196F3', 20);
                 return;
             }
             if (player.invuln > 0) return;
             lives--;
             hurtFlash = 20;
+            Sound.hurt();
             spawnParticles(player.x + player.w/2, player.y + player.h/2, '#E53935', 15);
             if (lives <= 0) {
+                Sound.defeat();
                 lives = 3;
                 score = 0;
                 loadLevel(currentLevel);
@@ -393,17 +640,18 @@
 
         async function onWin() {
             win = true;
+            Sound.victory();
             try { if (ysdk) ysdk.adv.showFullscreenAdv(); } catch(e){}
 
             if (currentLevel < LEVELS.length - 1) {
-                winText = 'УРОВЕНЬ ' + (currentLevel + 1) + ' ПРОЙДЕН!';
+                winText = t('level') + ' ' + (currentLevel + 1) + ' ' + t('passed');
                 setTimeout(() => {
                     currentLevel++;
                     loadLevel(currentLevel);
                     win = false;
                 }, 2200);
             } else {
-                winText = 'ВСЕ УРОВНИ ПРОЙДЕНЫ!';
+                winText = t('allPassed');
                 if (score > bestScore) {
                     bestScore = score;
                     await saveProgress();
@@ -419,7 +667,7 @@
         }
 
         // ============================================
-        // ЛОГИКА БОССА
+        // БОСС
         // ============================================
         function spawnBoss() {
             boss.active = true;
@@ -430,6 +678,7 @@
             boss.shootTimer = 90;
             boss.invuln = 60;
             boss.hurtTimer = 0;
+            Sound.bonus();
             spawnParticles(boss.x + boss.w/2, boss.y + boss.h/2, '#FF0000', 30);
         }
 
@@ -444,6 +693,7 @@
             boss.shootTimer--;
             if (boss.shootTimer <= 0) {
                 boss.shootTimer = 80 + Math.random() * 60;
+                Sound.bossShoot();
                 const pcx = player.x + player.w/2;
                 const pcy = player.y + player.h/2;
                 const bcx = boss.x + boss.w/2;
@@ -453,8 +703,7 @@
                 const speed = 4.5;
                 bossProjectiles.push({
                     x: bcx, y: bcy,
-                    vx: (dx/dist)*speed,
-                    vy: (dy/dist)*speed,
+                    vx: (dx/dist)*speed, vy: (dy/dist)*speed,
                     r: 12, life: 240
                 });
             }
@@ -467,11 +716,13 @@
                         boss.invuln = 40;
                         boss.hurtTimer = 20;
                         player.vy = -11;
+                        Sound.stomp();
                         spawnParticles(boss.x + boss.w/2, boss.y, '#FFD700', 25);
                         if (boss.hp <= 0) {
                             bossDefeated = true;
                             boss.active = false;
                             score += 100;
+                            Sound.victory();
                             spawnParticles(boss.x + boss.w/2, boss.y + boss.h/2, '#FF5722', 60);
                             try { if (ysdk) ysdk.adv.showFullscreenAdv(); } catch(e) {}
                         }
@@ -487,9 +738,7 @@
         function updateBossProjectiles() {
             for (let i = bossProjectiles.length - 1; i >= 0; i--) {
                 const p = bossProjectiles[i];
-                p.x += p.vx;
-                p.y += p.vy;
-                p.life--;
+                p.x += p.vx; p.y += p.vy; p.life--;
                 if (p.life <= 0 || p.x < -50 || p.x > W + 50 || p.y < -50 || p.y > H + 50) {
                     bossProjectiles.splice(i, 1);
                     continue;
@@ -500,6 +749,7 @@
                     if (player.shieldTime > 0) {
                         player.shieldTime = 0;
                         player.invuln = 60;
+                        Sound.hurt();
                         spawnParticles(p.x, p.y, '#2196F3', 15);
                     } else {
                         hitPlayer();
@@ -513,6 +763,8 @@
         // ОБНОВЛЕНИЕ
         // ============================================
         function update() {
+            if (paused) return;
+
             if (player.invuln > 0) player.invuln--;
             if (hurtFlash > 0) hurtFlash--;
             if (player.shieldTime > 0) player.shieldTime--;
@@ -570,6 +822,8 @@
                 player.vy = JUMP_POWER;
                 player.jumpsLeft--;
                 player.onGround = false;
+                if (player.jumpsLeft === MAX_JUMPS - 1) Sound.jump();
+                else Sound.doubleJump();
                 spawnParticles(
                     player.x + player.w/2, player.y + player.h,
                     player.jumpsLeft === MAX_JUMPS - 1 ? '#fff' : '#FFD700', 6
@@ -611,6 +865,7 @@
                 if (!c.collected && circleRectCollide(c.x, c.y, c.r, player)) {
                     c.collected = true;
                     score += 10;
+                    Sound.coin();
                     spawnParticles(c.x, c.y, '#FFD700', 12);
                 }
             }
@@ -621,6 +876,7 @@
                 if (circleRectCollide(b.x, by, b.r, player)) {
                     b.active = false;
                     b.respawnTimer = BONUS_RESPAWN;
+                    Sound.bonus();
                     if (b.type === 'shield') { player.shieldTime = EFFECT_DURATION; spawnParticles(b.x, by, '#2196F3', 20); }
                     else if (b.type === 'speed') { player.speedTime = EFFECT_DURATION; spawnParticles(b.x, by, '#FFC107', 20); }
                     else if (b.type === 'heart') { lives = Math.min(lives + 1, MAX_LIVES); spawnParticles(b.x, by, '#E91E63', 20); }
@@ -718,7 +974,7 @@
                 ctx.fillStyle = '#fff';
                 ctx.font = '15px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText('🔼×2 двойной прыжок · 🧲 магнит · 🐢 замедление · 👹 босс на 2-м уровне', W/2, H - 115);
+                ctx.fillText(t('hint'), W/2, H - 115);
             }
 
             if (hurtFlash > 0) {
@@ -741,21 +997,20 @@
                 if (currentLevel === LEVELS.length - 1) {
                     ctx.fillStyle = '#fff';
                     ctx.font = '24px Arial';
-                    ctx.fillText('Очки: ' + score, W/2, H/2 + 30);
+                    ctx.fillText(t('score') + ': ' + score, W/2, H/2 + 30);
                     ctx.font = '18px Arial';
                     ctx.fillStyle = '#FFD700';
-                    ctx.fillText('Рекорд: ' + bestScore, W/2, H/2 + 65);
+                    ctx.fillText(t('record') + ': ' + bestScore, W/2, H/2 + 65);
                 } else {
                     ctx.fillStyle = '#fff';
                     ctx.font = '20px Arial';
-                    ctx.fillText('Загрузка следующего уровня...', W/2, H/2 + 40);
+                    ctx.fillText(t('nextLevel'), W/2, H/2 + 40);
                 }
             }
         }
 
         const BONUS_COLORS = { shield: '#2196F3', speed: '#FFC107', heart: '#E91E63', magnet: '#9C27B0', slow: '#00BCD4' };
         const BONUS_ICONS  = { shield: '🛡', speed: '⚡', heart: '♥', magnet: '🧲', slow: '🐢' };
-        const BONUS_NAMES  = { shield: 'Щит', speed: 'Ускорение', heart: 'Жизнь', magnet: 'Магнит', slow: 'Замедление' };
 
         function drawBonus(b) {
             const by = b.y + Math.sin(Date.now() / 300 + b.phase) * 4;
@@ -797,7 +1052,7 @@
                 ctx.fillStyle = ef.type === 'speed' ? '#000' : '#fff';
                 ctx.font = 'bold 14px Arial';
                 ctx.textAlign = 'left';
-                ctx.fillText(BONUS_ICONS[ef.type] + ' ' + BONUS_NAMES[ef.type], x + 8, y + 17);
+                ctx.fillText(BONUS_ICONS[ef.type] + ' ' + t(ef.type), x + 8, y + 17);
                 x += w + 8;
             }
         }
@@ -962,7 +1217,7 @@
             ctx.fillStyle = '#FFF';
             ctx.font = 'bold 16px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('👹 БОСС  ' + boss.hp + '/' + boss.maxHp, W/2, barY - 10);
+            ctx.fillText('👹 ' + t('boss') + '  ' + boss.hp + '/' + boss.maxHp, W/2, barY - 10);
         }
 
         function drawBossProjectiles() {
@@ -990,6 +1245,17 @@
         // СТАРТ
         // ============================================
         loadLevel(0);
+        applyLocalization();
+
+        // Пауза звука при сворачивании вкладки
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                Sound.pauseAll();
+            } else if (!paused) {
+                Sound.resumeAll();
+            }
+        });
+
         function loop() {
             update();
             draw();
